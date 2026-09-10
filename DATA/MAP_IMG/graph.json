@@ -1,0 +1,71 @@
+{
+  "nodes": [
+    {
+      "id": "node_101",
+      "name": "Classroom 101",
+      "type": "room",
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.0,
+      "floor": "GF"
+    },
+    {
+      "id": "node_102",
+      "name": "Classroom 102",
+      "type": "room",
+      "x": 10.0,
+      "y": 0.0,
+      "z": 0.0,
+      "floor": "GF"
+    },
+    {
+      "id": "node_201",
+      "name": "Lab 201",
+      "type": "room",
+      "x": 0.0,
+      "y": 4.0,
+      "z": 0.0,
+      "floor": "FF"
+    },
+    {
+      "id": "stair_bottom",
+      "name": "Stairs",
+      "type": "stairs",
+      "x": 5.0,
+      "y": 0.0,
+      "z": 0.0,
+      "floor": "GF"
+    },
+    {
+      "id": "stair_top",
+      "name": "Stairs",
+      "type": "stairs",
+      "x": 5.0,
+      "y": 4.0,
+      "z": 0.0,
+      "floor": "FF"
+    }
+  ],
+  "edges": [
+    {
+      "from": "node_101",
+      "to": "node_102",
+      "distance": 10.0
+    },
+    {
+      "from": "node_101",
+      "to": "stair_bottom",
+      "distance": 5.0
+    },
+    {
+      "from": "stair_bottom",
+      "to": "stair_top",
+      "distance": 4.0
+    },
+    {
+      "from": "stair_top",
+      "to": "node_201",
+      "distance": 5.0
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "campusId": "CIT",
+  "buildingId": "AcademicBlock",
+  "version": "1.0",
+  "floors": [
+    {
+      "id": "GF",
+      "rooms": [
+        {
+          "uuid": "room_101",
+          "roomId": "101",
+          "type": "classroom",
+          "mesh": "Room_101_Mesh",
+          "anchor": "Room_101_Anchor",
+          "collision": "Room_101_Collision",
+          "navigationNode": "node_101"
+        },
+        {
+          "uuid": "room_102",
+          "roomId": "102",
+          "type": "classroom",
+          "mesh": "Room_102_Mesh",
+          "anchor": "Room_102_Anchor",
+          "collision": "Room_102_Collision",
+          "navigationNode": "node_102"
+        }
+      ]
+    },
+    {
+      "id": "FF",
+      "rooms": [
+        {
+          "uuid": "room_201",
+          "roomId": "201",
+          "type": "lab",
+          "mesh": "Room_201_Mesh",
+          "anchor": "Room_201_Anchor",
+          "collision": "Room_201_Collision",
+          "navigationNode": "node_201"
+        }
+      ]
+    }
+  ]
+}

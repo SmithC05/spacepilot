@@ -1,0 +1,10 @@
+# Agent dependencies
+# Install into the isolated venv: .venv\Scripts\pip install -r requirements.txt
+#
+# NOTE: The agent venv uses mcp==1.30.0 (installed as a strands-agents dependency).
+# This is DIFFERENT from the mcp server venv (mcp==1.9.4).
+# Do NOT change the mcp version here — it is managed by strands-agents.
+strands-agents==0.1.9
+boto3==1.35.36
+python-dotenv==1.0.1
+httpx==0.27.2
