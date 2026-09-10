@@ -205,7 +205,6 @@ def _path_to_steps(path: list[str]) -> list[dict]:
     for i, nid in enumerate(path):
         node = _NODES.get(nid, {})
         name  = node.get("name", nid)
-        ntype = node.get("name", "").lower()
 
         # Skip anonymous corridor waypoints (named "Node N") unless they
         # are the start or end of the path.

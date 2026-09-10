@@ -1,10 +1,12 @@
 """
 SpacePilot MCP — test suite
 
-Tests are grouped into three areas:
+Tests are grouped into five areas:
     1. Navigation module  — pure logic, no backend needed
     2. Tool functions     — backend calls mocked with unittest.mock
     3. MCP server         — tool registration and transport verification
+    4. Time overlap helper — booking conflict detection edge cases
+    5. Phase 2 tools      — structured stubs and backend-delegated tools
 
 Run:
     cd mcp
@@ -138,6 +140,13 @@ class TestNavigation:
         if "error" not in result and "cross_building" not in result:
             assert "has_stairs" in result
 
+    def test_accessible_route_returns_accessible_flag(self):
+        """Accessible route result always contains accessible key (when no error)."""
+        result = self.nav.get_route_between("201", "202", accessible=True)
+        if "error" not in result:
+            assert "accessible" in result
+            assert result["accessible"] is True
+
     def test_normalize_node_id_fixes_map_prefix(self):
         """_normalize_node_id corrects the Map_node_xxx bug in the 500 map."""
         fixed = self.nav._normalize_node_id("Map_node_001", "500")
@@ -157,6 +166,18 @@ class TestNavigation:
         for r in rooms[:5]:
             assert "name"   in r
             assert "map_id" in r
+
+    def test_same_room_route_is_distance_zero(self):
+        """Routing to the same room returns distance 0 and a single step."""
+        result = self.nav.get_route_between("201", "201")
+        assert "error" not in result
+        assert result["distance_units"] == 0
+        assert len(result["steps"]) == 1
+
+    def test_same_room_route_has_no_stairs(self):
+        """Routing to the same room reports no stairs."""
+        result = self.nav.get_route_between("201", "201")
+        assert result.get("has_stairs") is False
 
 
 # ===========================================================================
@@ -236,6 +257,28 @@ class TestFindRooms:
         assert result["total"] == 2
 
     @patch("tools._get")
+    def test_combined_all_filters(self, mock_get):
+        """capacity + projector + accessible + availability all together."""
+        def _mock_get(path, params=None):
+            if path == "/rooms":
+                return SAMPLE_ROOMS
+            if path == "/bookings":
+                return []  # no bookings
+            return []
+        mock_get.side_effect = _mock_get
+        result = self.tools.find_rooms(
+            capacity=8,
+            projector_required=True,
+            accessible_required=True,
+            start_datetime="2024-11-15T16:00",
+            end_datetime="2024-11-15T17:00",
+        )
+        # Only Room A passes all filters
+        assert result["total"] == 1
+        assert result["rooms"][0]["name"] == "Room A"
+        assert result["availability_checked"] is True
+
+    @patch("tools._get")
     def test_availability_filter_excludes_booked_rooms(self, mock_get):
         """Rooms with overlapping bookings are excluded from results."""
         def _mock_get(path, params=None):
@@ -255,6 +298,84 @@ class TestFindRooms:
         room_ids = {r["id"] for r in result["rooms"]}
         assert 2 not in room_ids  # booked
         assert 1 in room_ids      # free (its booking is 14:00–15:00)
+
+    @patch("tools._get")
+    def test_availability_filter_booking_starts_before_window(self, mock_get):
+        """Booking that starts before the window but ends inside it is a conflict."""
+        booking = {
+            "id": 200, "room_id": 3, "user_id": 1,
+            "start_time": "2024-11-15T15:30:00",
+            "end_time":   "2024-11-15T16:30:00",
+            "purpose": "Early start", "status": "confirmed",
+        }
+        def _mock_get(path, params=None):
+            if path == "/rooms":
+                return SAMPLE_ROOMS
+            if path == "/bookings":
+                return [booking]
+            return []
+        mock_get.side_effect = _mock_get
+        result = self.tools.find_rooms(
+            start_datetime="2024-11-15T16:00",
+            end_datetime="2024-11-15T17:00",
+        )
+        room_ids = {r["id"] for r in result["rooms"]}
+        assert 3 not in room_ids  # overlaps
+
+    @patch("tools._get")
+    def test_availability_filter_booking_spans_entire_window(self, mock_get):
+        """Booking that contains the entire requested window is a conflict."""
+        booking = {
+            "id": 201, "room_id": 1, "user_id": 1,
+            "start_time": "2024-11-15T15:00:00",
+            "end_time":   "2024-11-15T18:00:00",
+            "purpose": "All day", "status": "confirmed",
+        }
+        def _mock_get(path, params=None):
+            if path == "/rooms":
+                return SAMPLE_ROOMS
+            if path == "/bookings":
+                return [booking]
+            return []
+        mock_get.side_effect = _mock_get
+        result = self.tools.find_rooms(
+            start_datetime="2024-11-15T16:00",
+            end_datetime="2024-11-15T17:00",
+        )
+        room_ids = {r["id"] for r in result["rooms"]}
+        assert 1 not in room_ids  # overlaps
+
+    @patch("tools._get")
+    def test_availability_skipped_if_bookings_backend_fails(self, mock_get):
+        """If bookings endpoint fails, availability_checked is False and rooms still returned."""
+        from tools import BackendError
+
+        def _mock_get(path, params=None):
+            if path == "/rooms":
+                return SAMPLE_ROOMS
+            if path == "/bookings":
+                raise BackendError("Cannot connect")
+            return []
+        mock_get.side_effect = _mock_get
+        result = self.tools.find_rooms(
+            start_datetime="2024-11-15T16:00",
+            end_datetime="2024-11-15T17:00",
+        )
+        assert result["availability_checked"] is False
+        # Should still return attribute-filtered rooms (all 3 in this case)
+        assert result["total"] == 3
+
+    @patch("tools._get")
+    def test_rooms_fields_are_normalized(self, mock_get):
+        """find_rooms should only return known room fields, not extra backend fields."""
+        rooms_with_extra = [
+            {**SAMPLE_ROOMS[0], "internal_db_field": "secret", "raw_sql_id": 9999}
+        ]
+        mock_get.return_value = rooms_with_extra
+        result = self.tools.find_rooms()
+        for room in result["rooms"]:
+            assert "internal_db_field" not in room
+            assert "raw_sql_id" not in room
 
     @patch("tools._get")
     def test_invalid_capacity_returns_error(self, mock_get):
@@ -302,6 +423,14 @@ class TestGetRoomDetails:
         result = self.tools.get_room_details(1)
         assert result["id"] == 1
         assert result["name"] == "Room A"
+
+    @patch("tools._get")
+    def test_normalized_fields_only(self, mock_get):
+        """get_room_details should strip unknown fields from the backend response."""
+        mock_get.return_value = {**SAMPLE_ROOMS[0], "extra_field": "hidden"}
+        result = self.tools.get_room_details(1)
+        assert "extra_field" not in result
+        assert result["id"] == 1
 
     @patch("tools._get")
     def test_not_found_returns_error(self, mock_get):
@@ -363,11 +492,28 @@ class TestCheckRoomAvailability:
         assert result["available"] is True
 
     @patch("tools._get")
+    def test_available_when_booking_is_adjacent_after(self, mock_get):
+        """Booking starting exactly at request end is NOT an overlap."""
+        booking = {**SAMPLE_BOOKINGS[0], "start_time": "2024-11-15T17:00:00", "end_time": "2024-11-15T18:00:00"}
+        self._mock_backend(mock_get, bookings=[booking])
+        result = self.tools.check_room_availability(1, "2024-11-15T16:00", "2024-11-15T17:00")
+        assert result["available"] is True
+
+    @patch("tools._get")
     def test_cancelled_booking_does_not_conflict(self, mock_get):
         cancelled = {**SAMPLE_BOOKINGS[0], "status": "cancelled"}
         self._mock_backend(mock_get, bookings=[cancelled])
         result = self.tools.check_room_availability(1, "2024-11-15T14:00", "2024-11-15T15:00")
         assert result["available"] is True
+
+    @patch("tools._get")
+    def test_result_includes_room_details(self, mock_get):
+        """check_room_availability result should include room capacity, projector, accessible."""
+        self._mock_backend(mock_get)
+        result = self.tools.check_room_availability(1, "2024-11-15T16:00", "2024-11-15T17:00")
+        assert "capacity" in result
+        assert "projector" in result
+        assert "accessible" in result
 
     def test_invalid_room_id_returns_error(self):
         result = self.tools.check_room_availability(0, "2024-11-15T16:00", "2024-11-15T17:00")
@@ -398,6 +544,13 @@ class TestNavigationTools:
             assert "steps" in result
             assert isinstance(result["steps"], list)
 
+    def test_get_route_result_has_expected_keys(self):
+        """get_route result contains known keys when successful."""
+        result = self.tools.get_route("201", "202")
+        if "error" not in result and "cross_building" not in result:
+            for key in ("from_room", "to_room", "steps", "distance_units", "has_stairs"):
+                assert key in result, f"Missing key: {key}"
+
     def test_get_route_unknown_from_room(self):
         result = self.tools.get_route("GHOST_ROOM_111", "201")
         assert "error" in result
@@ -419,9 +572,28 @@ class TestNavigationTools:
         if "error" not in result and "cross_building" not in result:
             assert "has_stairs" in result
 
+    def test_get_accessible_route_returns_accessible_flag_true(self):
+        """get_accessible_route always sets accessible=True in non-error results."""
+        result = self.tools.get_accessible_route("201", "202")
+        if "error" not in result:
+            assert result.get("accessible") is True
+
+    def test_get_route_returns_accessible_false(self):
+        """get_route sets accessible=False in non-error results."""
+        result = self.tools.get_route("201", "202")
+        if "error" not in result:
+            assert result.get("accessible") is False
+
     def test_get_accessible_route_unknown_room(self):
         result = self.tools.get_accessible_route("NOSUCHROOM", "201")
         assert "error" in result
+
+    def test_get_accessible_route_with_stairs_adds_warning(self):
+        """If the route has stairs, accessibility_warning should be present."""
+        result = self.tools.get_accessible_route("201", "202")
+        if "error" not in result and "cross_building" not in result:
+            if result.get("has_stairs"):
+                assert "accessibility_warning" in result
 
 
 # ===========================================================================
@@ -504,6 +676,12 @@ class TestMCPServer:
         """Streamable HTTP endpoint path is /mcp (MCP SDK default)."""
         assert self.server.mcp.settings.streamable_http_path == "/mcp"
 
+    def test_tool_count_is_exactly_12(self):
+        """Exactly 12 tools are registered — no accidental additions or removals."""
+        import asyncio
+        tools = asyncio.run(self.server.mcp.list_tools())
+        assert len(tools) == 12, f"Expected 12 tools, found {len(tools)}"
+
 
 # ===========================================================================
 # 4. Time overlap helper tests
@@ -555,6 +733,304 @@ class TestOverlapHelper:
     def test_completely_after(self):
         assert self.overlaps("2024-11-15T18:00", "2024-11-15T19:00",
                              self.start, self.end) is False
+
+
+# ===========================================================================
+# 5. Phase 2 tool tests
+# ===========================================================================
+
+class TestCreateBooking:
+    """Tests for tools.create_booking()."""
+
+    def setup_method(self):
+        import tools
+        self.tools = tools
+
+    BOOKING_RESPONSE = {
+        "id": 42, "room_id": 1, "user_id": 5,
+        "start_time": "2024-11-15T16:00:00",
+        "end_time":   "2024-11-15T17:00:00",
+        "purpose": "Sprint planning", "status": "confirmed",
+    }
+
+    @patch("tools._post")
+    def test_create_booking_success(self, mock_post):
+        mock_post.return_value = self.BOOKING_RESPONSE
+        result = self.tools.create_booking(1, 5, "2024-11-15T16:00", "2024-11-15T17:00", "Sprint planning")
+        assert result["id"] == 42
+        assert result["status"] == "confirmed"
+        assert "error" not in result
+
+    @patch("tools._post")
+    def test_create_booking_normalizes_fields(self, mock_post):
+        """create_booking should strip unknown fields from backend response."""
+        response_with_extra = {**self.BOOKING_RESPONSE, "internal_flag": True}
+        mock_post.return_value = response_with_extra
+        result = self.tools.create_booking(1, 5, "2024-11-15T16:00", "2024-11-15T17:00")
+        assert "internal_flag" not in result
+
+    def test_invalid_room_id_returns_error(self):
+        result = self.tools.create_booking(0, 5, "2024-11-15T16:00", "2024-11-15T17:00")
+        assert "error" in result
+
+    def test_invalid_user_id_returns_error(self):
+        result = self.tools.create_booking(1, -1, "2024-11-15T16:00", "2024-11-15T17:00")
+        assert "error" in result
+
+    def test_invalid_start_time_returns_error(self):
+        result = self.tools.create_booking(1, 5, "BAD-DATE", "2024-11-15T17:00")
+        assert "error" in result
+
+    def test_end_before_start_returns_error(self):
+        result = self.tools.create_booking(1, 5, "2024-11-15T17:00", "2024-11-15T16:00")
+        assert "error" in result
+
+    @patch("tools._post")
+    def test_backend_error_returns_error_dict(self, mock_post):
+        from tools import BackendError
+        mock_post.side_effect = BackendError("Backend unavailable")
+        result = self.tools.create_booking(1, 5, "2024-11-15T16:00", "2024-11-15T17:00")
+        assert "error" in result
+
+
+class TestUpdateBooking:
+    """Tests for tools.update_booking()."""
+
+    def setup_method(self):
+        import tools
+        self.tools = tools
+
+    UPDATED_RESPONSE = {
+        "id": 42, "room_id": 1, "user_id": 5,
+        "start_time": "2024-11-15T17:00:00",
+        "end_time":   "2024-11-15T18:00:00",
+        "purpose": "Updated", "status": "confirmed",
+    }
+
+    @patch("tools._patch")
+    def test_update_purpose_only(self, mock_patch):
+        mock_patch.return_value = self.UPDATED_RESPONSE
+        result = self.tools.update_booking(42, purpose="Updated")
+        assert "error" not in result
+
+    @patch("tools._patch")
+    def test_update_times(self, mock_patch):
+        mock_patch.return_value = self.UPDATED_RESPONSE
+        result = self.tools.update_booking(42, start_time="2024-11-15T17:00", end_time="2024-11-15T18:00")
+        assert "error" not in result
+
+    def test_invalid_booking_id_returns_error(self):
+        result = self.tools.update_booking(0, purpose="x")
+        assert "error" in result
+
+    def test_negative_booking_id_returns_error(self):
+        result = self.tools.update_booking(-5, purpose="x")
+        assert "error" in result
+
+    def test_no_updates_returns_error(self):
+        result = self.tools.update_booking(42)
+        assert "error" in result
+
+    def test_invalid_start_time_returns_error(self):
+        result = self.tools.update_booking(42, start_time="BADDATE", end_time="2024-11-15T17:00")
+        assert "error" in result
+
+    def test_end_before_start_returns_error(self):
+        result = self.tools.update_booking(42, start_time="2024-11-15T17:00", end_time="2024-11-15T16:00")
+        assert "error" in result
+
+    @patch("tools._patch")
+    def test_backend_error_returns_error_dict(self, mock_patch):
+        from tools import BackendError
+        mock_patch.side_effect = BackendError("Not found")
+        result = self.tools.update_booking(99, purpose="x")
+        assert "error" in result
+
+
+class TestCancelBooking:
+    """Tests for tools.cancel_booking()."""
+
+    def setup_method(self):
+        import tools
+        self.tools = tools
+
+    CANCELLED_RESPONSE = {
+        "id": 42, "room_id": 1, "user_id": 5,
+        "start_time": "2024-11-15T16:00:00",
+        "end_time":   "2024-11-15T17:00:00",
+        "purpose": "Sprint planning", "status": "cancelled",
+    }
+
+    @patch("tools._patch")
+    def test_cancel_booking_success(self, mock_patch):
+        mock_patch.return_value = self.CANCELLED_RESPONSE
+        result = self.tools.cancel_booking(42)
+        assert "error" not in result
+        assert result["status"] == "cancelled"
+
+    def test_invalid_booking_id_returns_error(self):
+        result = self.tools.cancel_booking(0)
+        assert "error" in result
+
+    def test_negative_booking_id_returns_error(self):
+        result = self.tools.cancel_booking(-1)
+        assert "error" in result
+
+    @patch("tools._patch")
+    def test_backend_error_returns_error_dict(self, mock_patch):
+        from tools import BackendError
+        mock_patch.side_effect = BackendError("Booking not found")
+        result = self.tools.cancel_booking(999)
+        assert "error" in result
+
+
+class TestGetEvents:
+    """Tests for tools.get_events()."""
+
+    def setup_method(self):
+        import tools
+        self.tools = tools
+
+    SAMPLE_EVENTS = [
+        {"id": 1, "name": "Hackathon", "location": "Main Hall",
+         "start_time": "2024-11-15T09:00:00", "end_time": "2024-11-15T18:00:00"},
+        {"id": 2, "name": "Tech Talk", "location": "Room 201",
+         "start_time": "2024-11-16T14:00:00", "end_time": "2024-11-16T15:00:00"},
+    ]
+
+    @patch("tools._get")
+    def test_get_events_returns_dict(self, mock_get):
+        """get_events should return a dict, not a list."""
+        mock_get.return_value = self.SAMPLE_EVENTS
+        result = self.tools.get_events()
+        assert isinstance(result, dict)
+
+    @patch("tools._get")
+    def test_get_events_has_events_and_total(self, mock_get):
+        mock_get.return_value = self.SAMPLE_EVENTS
+        result = self.tools.get_events()
+        assert "events" in result
+        assert "total" in result
+        assert result["total"] == 2
+        assert len(result["events"]) == 2
+
+    @patch("tools._get")
+    def test_get_events_event_has_expected_fields(self, mock_get):
+        mock_get.return_value = self.SAMPLE_EVENTS
+        result = self.tools.get_events()
+        for event in result["events"]:
+            for key in ("id", "name", "location", "start_time", "end_time"):
+                assert key in event, f"Missing field '{key}' in event"
+
+    @patch("tools._get")
+    def test_get_events_backend_error_returns_error_dict(self, mock_get):
+        from tools import BackendError
+        mock_get.side_effect = BackendError("Cannot connect")
+        result = self.tools.get_events()
+        assert isinstance(result, dict)
+        assert "error" in result
+
+    @patch("tools._get")
+    def test_get_events_empty_returns_empty_list(self, mock_get):
+        mock_get.return_value = []
+        result = self.tools.get_events()
+        assert result["total"] == 0
+        assert result["events"] == []
+
+
+class TestCheckPolicy:
+    """Tests for tools.check_policy()."""
+
+    def setup_method(self):
+        import tools
+        self.tools = tools
+
+    SAMPLE_POLICIES = [
+        {"id": 1, "name": "Booking Policy", "description": "Max booking duration is 4 hours."},
+        {"id": 2, "name": "Noise Policy", "description": "No loud noise after 6 PM."},
+        {"id": 3, "name": "Food Policy", "description": "No food in meeting rooms."},
+    ]
+
+    @patch("tools._get")
+    def test_check_policy_returns_dict(self, mock_get):
+        mock_get.return_value = self.SAMPLE_POLICIES
+        result = self.tools.check_policy()
+        assert isinstance(result, dict)
+
+    @patch("tools._get")
+    def test_check_policy_has_policies_and_total(self, mock_get):
+        mock_get.return_value = self.SAMPLE_POLICIES
+        result = self.tools.check_policy()
+        assert "policies" in result
+        assert "total" in result
+        assert result["total"] == 3
+
+    @patch("tools._get")
+    def test_check_policy_filters_by_keyword(self, mock_get):
+        mock_get.return_value = self.SAMPLE_POLICIES
+        result = self.tools.check_policy(query="noise")
+        assert result["total"] == 1
+        assert result["policies"][0]["name"] == "Noise Policy"
+        assert result["query"] == "noise"
+
+    @patch("tools._get")
+    def test_check_policy_no_match_returns_empty(self, mock_get):
+        mock_get.return_value = self.SAMPLE_POLICIES
+        result = self.tools.check_policy(query="XYZZY_NOT_A_POLICY")
+        assert result["total"] == 0
+        assert result["policies"] == []
+
+    @patch("tools._get")
+    def test_check_policy_backend_error_returns_error_dict(self, mock_get):
+        from tools import BackendError
+        mock_get.side_effect = BackendError("Cannot connect")
+        result = self.tools.check_policy()
+        assert isinstance(result, dict)
+        assert "error" in result
+
+
+class TestStubTools:
+    """Tests for check_team_availability and notify_team stubs."""
+
+    def setup_method(self):
+        import tools
+        self.tools = tools
+
+    def test_check_team_availability_returns_dict(self):
+        result = self.tools.check_team_availability(1, "2024-11-15T16:00", "2024-11-15T17:00")
+        assert isinstance(result, dict)
+
+    def test_check_team_availability_has_error_key(self):
+        """Stub must contain an error key so agent does not treat it as real data."""
+        result = self.tools.check_team_availability(1, "2024-11-15T16:00", "2024-11-15T17:00")
+        assert "error" in result
+
+    def test_check_team_availability_has_available_members(self):
+        result = self.tools.check_team_availability(1, "2024-11-15T16:00", "2024-11-15T17:00")
+        assert "available_members" in result
+        assert result["available_members"] == []
+
+    def test_check_team_availability_echoes_team_id(self):
+        result = self.tools.check_team_availability(7, "2024-11-15T16:00", "2024-11-15T17:00")
+        assert result["team_id"] == 7
+
+    def test_notify_team_returns_dict(self):
+        result = self.tools.notify_team(1, "Meeting at 4 PM")
+        assert isinstance(result, dict)
+
+    def test_notify_team_sent_is_false(self):
+        """Stub must not claim the message was delivered."""
+        result = self.tools.notify_team(1, "Meeting at 4 PM")
+        assert result.get("sent") is False
+
+    def test_notify_team_has_error_key(self):
+        result = self.tools.notify_team(1, "Meeting at 4 PM")
+        assert "error" in result
+
+    def test_notify_team_echoes_message(self):
+        result = self.tools.notify_team(3, "Hello team!")
+        assert result["message"] == "Hello team!"
+        assert result["team_id"] == 3
 
 
 if __name__ == "__main__":

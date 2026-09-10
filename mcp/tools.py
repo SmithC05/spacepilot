@@ -8,7 +8,7 @@ Phase 1 (implemented with real logic):
     find_rooms, get_room_details, check_room_availability,
     get_route, get_accessible_route
 
-Phase 2 (functional stubs — delegate to backend or return structured placeholder):
+Phase 2 (functional — delegate to backend or return clear structured stub):
     get_events, check_policy, create_booking, update_booking,
     cancel_booking, check_team_availability, notify_team
 """
@@ -26,6 +26,37 @@ load_dotenv()
 
 BACKEND_URL  = os.getenv("BACKEND_URL", "http://localhost:8000")
 HTTP_TIMEOUT = float(os.getenv("HTTP_TIMEOUT", "10.0"))
+
+
+# ---------------------------------------------------------------------------
+# Known room fields — used to normalize backend responses for the agent
+# ---------------------------------------------------------------------------
+
+_ROOM_FIELDS = ("id", "name", "building", "floor", "capacity", "projector", "accessible")
+
+
+def _normalize_room(raw: dict) -> dict:
+    """Project only the expected room fields, with safe defaults."""
+    return {field: raw.get(field) for field in _ROOM_FIELDS}
+
+
+# ---------------------------------------------------------------------------
+# Known booking fields — used to normalize backend booking responses
+# ---------------------------------------------------------------------------
+
+_BOOKING_FIELDS = ("id", "room_id", "user_id", "start_time", "end_time", "purpose", "status")
+
+
+def _normalize_booking(raw: dict) -> dict:
+    """Project only the expected booking fields, coercing datetimes to strings."""
+    result = {}
+    for field in _BOOKING_FIELDS:
+        val = raw.get(field)
+        # Backend may return datetime objects when the response is already parsed
+        if isinstance(val, datetime):
+            val = val.isoformat()
+        result[field] = val
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -145,7 +176,9 @@ def find_rooms(
 
     - Attribute filters (capacity, projector, accessible) are applied first.
     - If start_datetime and end_datetime are both given, rooms with conflicting
-      confirmed bookings are excluded.
+      confirmed bookings are excluded. availability_checked will be True only
+      when the bookings endpoint was successfully queried.
+    - Room fields are normalized to a fixed schema.
 
     Returns:
         {
@@ -185,21 +218,24 @@ def find_rooms(
 
     # --- Fetch all rooms ---
     try:
-        rooms = _get("/rooms")
+        raw_rooms = _get("/rooms")
     except BackendError as e:
         return {"error": str(e), "rooms": [], "total": 0}
 
-    if not isinstance(rooms, list):
+    if not isinstance(raw_rooms, list):
         return {
             "error": "Unexpected response from /rooms — expected a JSON array.",
             "rooms": [], "total": 0,
         }
 
+    # Normalize to known schema
+    rooms = [_normalize_room(r) for r in raw_rooms]
+
     # --- Attribute filters ---
     filters_applied = []
 
     if capacity is not None:
-        rooms = [r for r in rooms if r.get("capacity", 0) >= capacity]
+        rooms = [r for r in rooms if (r.get("capacity") or 0) >= capacity]
         filters_applied.append(f"capacity >= {capacity}")
 
     if projector_required:
@@ -241,6 +277,7 @@ def find_rooms(
 
         except BackendError:
             # Cannot check availability — still return attribute-filtered rooms
+            # but clearly flag that availability was NOT verified
             filters_applied.append("availability check skipped (backend unavailable)")
 
     return {
@@ -255,11 +292,13 @@ def get_room_details(room_id: int) -> dict:
     """
     Return full details for a single room by its integer database ID.
     Returns an error dict if the room does not exist.
+    Fields are normalized to: id, name, building, floor, capacity, projector, accessible.
     """
     if not isinstance(room_id, int) or room_id < 1:
         return {"error": f"room_id must be a positive integer, got {room_id!r}"}
     try:
-        return _get(f"/rooms/{room_id}")
+        raw = _get(f"/rooms/{room_id}")
+        return _normalize_room(raw)
     except BackendError as e:
         return {"error": str(e)}
 
@@ -274,6 +313,9 @@ def check_room_availability(room_id: int, start_datetime: str, end_datetime: str
             "room_name": str,
             "building": str,
             "floor": int,
+            "capacity": int,
+            "projector": bool,
+            "accessible": bool,
             "start_datetime": str,
             "end_datetime": str,
             "available": bool,
@@ -373,28 +415,75 @@ def get_accessible_route(from_room: str, to_room: str) -> dict:
 # Phase 2 — Events and Policy (functional, delegate to backend)
 # ---------------------------------------------------------------------------
 
-def get_events() -> list:
-    """Return all upcoming campus events."""
+def get_events() -> dict:
+    """
+    Return all upcoming campus events.
+
+    Returns:
+        {
+            "events": [ { id, name, location, start_time, end_time } ],
+            "total": int
+        }
+        or { "error": "..." } on failure.
+    """
     try:
-        return _get("/events")
+        raw = _get("/events")
     except BackendError as e:
-        return [{"error": str(e)}]
+        return {"error": str(e)}
+
+    if not isinstance(raw, list):
+        return {"error": "Unexpected response from /events — expected a JSON array."}
+
+    events = [
+        {
+            "id":         item.get("id"),
+            "name":       item.get("name"),
+            "location":   item.get("location"),
+            "start_time": item.get("start_time"),
+            "end_time":   item.get("end_time"),
+        }
+        for item in raw
+    ]
+    return {"events": events, "total": len(events)}
 
 
-def check_policy(query: str = None) -> list:
-    """Return workspace policies, optionally filtered by keyword."""
+def check_policy(query: str = None) -> dict:
+    """
+    Return workspace policies, optionally filtered by keyword.
+
+    Returns:
+        {
+            "policies": [ { id, name, description } ],
+            "total": int,
+            "query": str or null
+        }
+        or { "error": "..." } on failure.
+    """
     try:
-        policies = _get("/policies")
+        raw = _get("/policies")
     except BackendError as e:
-        return [{"error": str(e)}]
+        return {"error": str(e)}
+
+    if not isinstance(raw, list):
+        return {"error": "Unexpected response from /policies — expected a JSON array."}
+
+    policies = [
+        {
+            "id":          item.get("id"),
+            "name":        item.get("name"),
+            "description": item.get("description"),
+        }
+        for item in raw
+    ]
 
     if query:
         q = query.lower()
         policies = [
             p for p in policies
-            if q in p.get("name", "").lower() or q in p.get("description", "").lower()
+            if q in (p.get("name") or "").lower() or q in (p.get("description") or "").lower()
         ]
-    return policies
+
+    return {"policies": policies, "total": len(policies), "query": query}
 
 
 # ---------------------------------------------------------------------------
@@ -408,15 +497,43 @@ def create_booking(
     end_time: str,
     purpose: str = None,
 ) -> dict:
-    """Create a new room booking."""
+    """
+    Create a new room booking.
+
+    Returns the confirmed booking from the backend on success.
+    Always call check_room_availability first to confirm the slot is free.
+
+    Returns:
+        { id, room_id, user_id, start_time, end_time, purpose, status }
+        or { "error": "..." } on failure.
+    """
+    if not isinstance(room_id, int) or room_id < 1:
+        return {"error": f"room_id must be a positive integer, got {room_id!r}"}
+    if not isinstance(user_id, int) or user_id < 1:
+        return {"error": f"user_id must be a positive integer, got {user_id!r}"}
+    if not start_time:
+        return {"error": "start_time is required."}
+    if not end_time:
+        return {"error": "end_time is required."}
+
     try:
-        return _post("/bookings", {
+        req_start = _parse_dt(start_time, "start_time")
+        req_end   = _parse_dt(end_time,   "end_time")
+    except ValueError as e:
+        return {"error": str(e)}
+
+    if req_end <= req_start:
+        return {"error": "end_time must be after start_time."}
+
+    try:
+        raw = _post("/bookings", {
             "room_id":    room_id,
             "user_id":    user_id,
             "start_time": start_time,
             "end_time":   end_time,
             "purpose":    purpose,
         })
+        return _normalize_booking(raw)
     except BackendError as e:
         return {"error": str(e)}
 
@@ -427,28 +544,61 @@ def update_booking(
     end_time: str = None,
     purpose: str = None,
 ) -> dict:
-    """Update an existing booking's time slot or purpose."""
+    """
+    Update an existing booking's time slot or purpose.
+
+    Returns the updated booking on success, or an error dict.
+    """
+    if not isinstance(booking_id, int) or booking_id < 1:
+        return {"error": f"booking_id must be a positive integer, got {booking_id!r}"}
+
     updates = {}
     if start_time:
+        try:
+            _parse_dt(start_time, "start_time")
+        except ValueError as e:
+            return {"error": str(e)}
         updates["start_time"] = start_time
     if end_time:
+        try:
+            _parse_dt(end_time, "end_time")
+        except ValueError as e:
+            return {"error": str(e)}
         updates["end_time"] = end_time
     if purpose:
         updates["purpose"] = purpose
+
     if not updates:
         return {
             "error": "Nothing to update. Provide at least one of: start_time, end_time, purpose."
         }
+
+    # If both times provided, validate ordering
+    if "start_time" in updates and "end_time" in updates:
+        req_start = _parse_dt(updates["start_time"], "start_time")
+        req_end   = _parse_dt(updates["end_time"],   "end_time")
+        if req_end <= req_start:
+            return {"error": "end_time must be after start_time."}
+
     try:
-        return _patch(f"/bookings/{booking_id}", updates)
+        raw = _patch(f"/bookings/{booking_id}", updates)
+        return _normalize_booking(raw)
     except BackendError as e:
         return {"error": str(e)}
 
 
 def cancel_booking(booking_id: int) -> dict:
-    """Cancel a booking by setting its status to 'cancelled'."""
+    """
+    Cancel a booking by setting its status to 'cancelled'.
+
+    Returns the updated booking with status='cancelled' on success,
+    or an error dict if the booking was not found or the backend is unavailable.
+    """
+    if not isinstance(booking_id, int) or booking_id < 1:
+        return {"error": f"booking_id must be a positive integer, got {booking_id!r}"}
     try:
-        return _patch(f"/bookings/{booking_id}", {"status": "cancelled"})
+        raw = _patch(f"/bookings/{booking_id}", {"status": "cancelled"})
+        return _normalize_booking(raw)
     except BackendError as e:
         return {"error": str(e)}
 
@@ -467,14 +617,15 @@ def check_team_availability(team_id: int, start_time: str, end_time: str) -> dic
     The backend team must implement these before this tool can return real data.
     """
     return {
-        "team_id":           team_id,
-        "start_time":        start_time,
-        "end_time":          end_time,
+        "available":        False,
+        "team_id":          team_id,
+        "start_time":       start_time,
+        "end_time":         end_time,
         "available_members": [],
-        "note": (
-            "Team availability check is not yet implemented. "
+        "error": (
+            "Team calendar integration is not yet available. "
             "Requires backend endpoints: GET /teams/{id}/members and "
-            "calendar event filtering by user. See integration notes."
+            "calendar event filtering by user."
         ),
     }
 
@@ -487,8 +638,8 @@ def notify_team(team_id: int, message: str) -> dict:
     Logs the intent; actual delivery requires an email/push/Slack integration.
     """
     return {
+        "sent":    False,
         "team_id": team_id,
         "message": message,
-        "sent":    False,
-        "note":    "Notification delivery not yet implemented. Message logged only.",
+        "error":   "Team notification delivery is not yet implemented. No message was sent.",
     }
