@@ -7,28 +7,28 @@
    ============================================================ */
 
 @theme {
-  /* Colors */
-  --color-bg:        #050505;
-  --color-surface:   #0F0F10;
-  --color-card:      #18181A;
-  --color-border:    #27272A;
-  --color-border-subtle: rgba(255,255,255,0.06);
+  /* Colors (Light Theme) */
+  --color-bg:        #FFFFFF;
+  --color-surface:   #FFFFFF;
+  --color-surface-subtle: #F5F5F5;
+  --color-card:      #FFFFFF;
+  --color-border:    #E5E5E5;
+  --color-border-strong: #D4D4D4;
 
-  --color-text:      #FFFFFF;
-  --color-text-secondary: #A1A1AA;
-  --color-text-muted: #52525B;
+  --color-text:      #111111;
+  --color-text-secondary: #525252;
+  --color-text-muted: #737373;
 
-  --color-accent:    #3B82F6;
-  --color-accent-hover: #2563EB;
-  --color-accent-subtle: rgba(59,130,246,0.10);
-  --color-accent-ring:   rgba(59,130,246,0.25);
+  --color-accent:    #2563EB;
+  --color-accent-hover: #1D4ED8;
+  --color-accent-subtle: rgba(37,99,235,0.08);
+  --color-accent-ring:   rgba(37,99,235,0.25);
 
-  --color-success:   #22C55E;
-  --color-success-subtle: rgba(34,197,94,0.10);
-  --color-warning:   #F59E0B;
-  --color-warning-subtle: rgba(245,158,11,0.10);
-  --color-error:     #EF4444;
-  --color-error-subtle: rgba(239,68,68,0.10);
+
+  --color-warning:   #D97706;
+  --color-warning-subtle: rgba(217,119,6,0.10);
+  --color-error:     #DC2626;
+  --color-error-subtle: rgba(220,38,38,0.10);
 
   /* Typography — Geist CSS variables injected by layout.tsx */
   --font-sans: var(--font-geist-sans, ui-sans-serif, system-ui, sans-serif);
@@ -48,6 +48,33 @@
   --duration-fast:   150ms;
   --duration-base:   200ms;
   --duration-slow:   350ms;
+}
+
+/* ============================================================
+   DARK MODE
+   ============================================================ */
+
+.dark {
+  --color-bg:        #000000;
+  --color-surface:   #0A0A0A;
+  --color-surface-subtle: #111111;
+  --color-card:      #0A0A0A;
+  --color-border:    #262626;
+  --color-border-strong: #333333;
+
+  --color-text:      #FFFFFF;
+  --color-text-secondary: #D4D4D4;
+  --color-text-muted: #A3A3A3;
+
+  --color-accent:    #3B82F6;
+  --color-accent-hover: #60A5FA;
+  --color-accent-subtle: rgba(59,130,246,0.15);
+  --color-accent-ring:   rgba(59,130,246,0.35);
+
+  --color-warning:   #F59E0B;
+  --color-warning-subtle: rgba(245,158,11,0.15);
+  --color-error:     #EF4444;
+  --color-error-subtle: rgba(239,68,68,0.15);
 }
 
 /* ============================================================
@@ -72,6 +99,7 @@ body {
   font-size: 15px;
   line-height: 1.6;
   min-height: 100vh;
+  transition: background-color var(--duration-fast) ease, color var(--duration-fast) ease;
 }
 
 /* ============================================================
@@ -129,24 +157,30 @@ body {
 }
 
 /* ============================================================
-   CARDS
+   CARDS & SURFACES
    ============================================================ */
 
 .card {
   background-color: var(--color-card);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
-  transition: border-color var(--duration-base) ease;
+  transition: background-color var(--duration-base) ease, border-color var(--duration-base) ease, color var(--duration-base) ease;
 }
 
 .card-surface {
   background-color: var(--color-surface);
-  border: 1px solid var(--color-border-subtle);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
+  transition: background-color var(--duration-base) ease, border-color var(--duration-base) ease, color var(--duration-base) ease;
 }
 
 .card:hover {
-  border-color: #3F3F46;
+  border-color: var(--color-border-strong);
+}
+
+/* Global transition for theme switching on common elements */
+.bubble-user, .bubble-agent, .input, .input-chat, .status-pill, rect, circle, path {
+  transition: background-color var(--duration-base) ease, border-color var(--duration-base) ease, color var(--duration-base) ease, fill var(--duration-base) ease, stroke var(--duration-base) ease;
 }
 
 /* ============================================================
@@ -205,8 +239,8 @@ body {
   border: 1px solid var(--color-border);
 }
 .btn-secondary:hover {
-  background-color: #222224;
-  border-color: #3F3F46;
+  background-color: var(--color-surface-subtle);
+  border-color: var(--color-border-strong);
 }
 
 /* Ghost */
@@ -215,7 +249,7 @@ body {
   color: var(--color-text-secondary);
 }
 .btn-ghost:hover {
-  background-color: var(--color-card);
+  background-color: var(--color-surface-subtle);
   color: var(--color-text);
 }
 
@@ -277,24 +311,24 @@ body {
    ============================================================ */
 
 .bubble-user {
-  background-color: var(--color-accent);
-  color: #fff;
-  border-radius: 18px 18px 4px 18px;
+  background-color: var(--color-surface-subtle);
+  color: var(--color-text);
+  border-radius: var(--radius-md) var(--radius-md) 4px var(--radius-md);
   padding: 10px 14px;
-  max-width: 78%;
-  font-size: 0.9rem;
+  max-width: 85%;
+  font-size: 0.9375rem;
   line-height: 1.55;
   align-self: flex-end;
 }
 
 .bubble-agent {
-  background-color: var(--color-card);
+  background-color: var(--color-bg);
   border: 1px solid var(--color-border);
   color: var(--color-text);
-  border-radius: 18px 18px 18px 4px;
+  border-radius: var(--radius-md) var(--radius-md) var(--radius-md) 4px;
   padding: 10px 14px;
-  max-width: 78%;
-  font-size: 0.9rem;
+  max-width: 85%;
+  font-size: 0.9375rem;
   line-height: 1.55;
   align-self: flex-start;
 }
@@ -310,7 +344,7 @@ body {
   flex-shrink: 0;
 }
 
-.status-dot-connected  { background-color: var(--color-success); }
+.status-dot-connected  { background-color: var(--color-accent); }
 .status-dot-checking   { background-color: var(--color-text-muted); }
 .status-dot-error      { background-color: var(--color-error); }
 .status-dot-thinking   { background-color: var(--color-accent); }
@@ -327,9 +361,9 @@ body {
 }
 
 .status-pill-connected {
-  color: var(--color-success);
-  border-color: rgba(34,197,94,0.25);
-  background-color: var(--color-success-subtle);
+  color: var(--color-accent);
+  border-color: var(--color-accent-ring);
+  background-color: var(--color-accent-subtle);
 }
 
 .status-pill-checking {
@@ -385,6 +419,27 @@ body {
   animation: fade-in 300ms ease both;
 }
 
+/* --- Welcome / Hero text animation --- */
+@keyframes translate-up {
+  from { transform: translateY(8px); }
+  to { transform: translateY(0); }
+}
+
+.animate-welcome {
+  animation: fade-in 300ms ease forwards, translate-up 300ms ease forwards;
+}
+
+/* --- Quick action staggered enter --- */
+@keyframes quick-action-enter {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-quick-action {
+  animation: quick-action-enter 250ms ease forwards;
+  opacity: 0;
+}
+
 /* --- Agent thinking: three dots pulse --- */
 @keyframes thinking-dot {
   0%, 80%, 100% { opacity: 0.2; transform: translateY(0); }
@@ -438,13 +493,13 @@ body {
 
 .card-interactive:hover {
   transform: translateY(-2px);
-  box-shadow: 0 8px 24px rgba(0,0,0,0.35);
-  border-color: #3F3F46;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+  border-color: var(--color-border-strong);
 }
 
 /* --- Success flash --- */
 @keyframes success-flash {
-  0%   { background-color: var(--color-success-subtle); }
+  0%   { background-color: var(--color-accent-subtle); }
   100% { background-color: transparent; }
 }
 
@@ -471,6 +526,31 @@ body {
   100% { left: 100%; width: 40%; }
 }
 
+/* --- Timeline Animations (Phase 2) --- */
+@keyframes timeline-enter {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-timeline-enter {
+  animation: timeline-enter var(--duration-base) ease forwards;
+}
+
+@keyframes check-appear {
+  from { stroke-dasharray: 20; stroke-dashoffset: 20; opacity: 0; transform: scale(0.8); }
+  to   { stroke-dasharray: 20; stroke-dashoffset: 0; opacity: 1; transform: scale(1); }
+}
+.animate-check-appear {
+  animation: check-appear 300ms ease-out forwards;
+}
+
+@keyframes pulse-subtle {
+  0%, 100% { transform: scale(1); opacity: 0.2; }
+  50%      { transform: scale(1.6); opacity: 0.1; }
+}
+.animate-pulse-subtle {
+  animation: pulse-subtle 1.8s ease-in-out infinite;
+}
+
 /* ============================================================
    REDUCED MOTION
    ============================================================ */
@@ -482,7 +562,10 @@ body {
   .spinner,
   .animate-dot-pulse,
   .animate-success,
-  .route-path {
+  .route-path,
+  .animate-timeline-enter,
+  .animate-check-appear,
+  .animate-pulse-subtle {
     animation: none !important;
     transition: none !important;
   }
