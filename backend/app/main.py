@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .database import engine
 from . import models
-from .routes import rooms, bookings, people, events, navigation, policies
+from .routes import rooms, bookings, people, events, navigation, policies, notifications
 
 # Create all database tables on startup (no migration needed for SQLite dev)
 models.Base.metadata.create_all(bind=engine)
@@ -30,6 +30,7 @@ app.include_router(people.router)
 app.include_router(events.router)
 app.include_router(navigation.router)
 app.include_router(policies.router)
+app.include_router(notifications.router)
 
 
 @app.get("/health", tags=["health"])
