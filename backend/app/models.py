@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
 
 from .database import Base
@@ -31,11 +31,25 @@ class Room(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
-    building = Column(String, nullable=False)
-    floor = Column(Integer, nullable=False)
+    building = Column(String, nullable=True)   # nullable — parsed from node_id prefix
+    floor = Column(Integer, nullable=True)     # nullable — parsed from node_id prefix
     capacity = Column(Integer, nullable=False)
     projector = Column(Boolean, default=False)
-    accessible = Column(Boolean, default=False)
+    accessible = Column(Boolean, default=False)  # maps to wheelchair_accessible in feature data
+
+    # Spatial graph link — foreign key into campus_maps.json / room_features.json
+    node_id = Column(String, unique=True, index=True, nullable=True)
+    x = Column(Float, nullable=True)   # map-coordinate x from campus_maps.json
+    y = Column(Float, nullable=True)   # map-coordinate y from campus_maps.json
+
+    # Extended feature columns from room_features.json
+    ac = Column(Boolean, default=False)
+    projector_type = Column(String, nullable=True)       # "HDMI" | "wireless" | None
+    wifi_quality = Column(String, nullable=True)         # poor | average | good | excellent
+    whiteboard = Column(Boolean, default=False)
+    computers = Column(Integer, default=0)
+    noise_level = Column(String, nullable=True)          # quiet | moderate | busy
+    booking_restrictions = Column(String, default="none")  # none | staff-only | max-2hr | approval-required
 
     bookings = relationship("Booking", back_populates="room")
 
@@ -65,6 +79,16 @@ class CalendarEvent(Base):
     end_time = Column(DateTime, nullable=False)
 
     user = relationship("User", back_populates="calendar_events")
+
+
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id         = Column(Integer, primary_key=True, index=True)
+    user_id    = Column(Integer, ForeignKey("users.id"), nullable=True)
+    team_id    = Column(Integer, ForeignKey("teams.id"), nullable=True)
+    message    = Column(Text, nullable=False)
+    created_at = Column(String, nullable=False)  # stored as ISO 8601 text, matching _ensure_table() DDL
 
 
 class CampusEvent(Base):

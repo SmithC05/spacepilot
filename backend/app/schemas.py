@@ -30,14 +30,24 @@ class User(UserBase):
 
 class RoomBase(BaseModel):
     name: str
-    building: str
-    floor: int
+    building: Optional[str] = None      # nullable — parsed from node_id prefix
+    floor: Optional[int] = None         # nullable — numeric blocks have no floor in ID
     capacity: int
     projector: bool = False
-    accessible: bool = False
+    accessible: bool = False            # maps to wheelchair_accessible in feature data
 
 class Room(RoomBase):
     id: int
+    node_id: Optional[str] = None      # spatial graph node link
+    x: Optional[float] = None
+    y: Optional[float] = None
+    ac: bool = False
+    projector_type: Optional[str] = None   # "HDMI" | "wireless" | None
+    wifi_quality: Optional[str] = None     # poor | average | good | excellent
+    whiteboard: bool = False
+    computers: int = 0
+    noise_level: Optional[str] = None      # quiet | moderate | busy
+    booking_restrictions: str = "none"
     model_config = {"from_attributes": True}
 
 
